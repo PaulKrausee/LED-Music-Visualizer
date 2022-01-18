@@ -1,1 +1,188 @@
+#include <FastLED.h>
 
+#define LED_PIN     6
+#define LED_PIN2    4
+
+#define NUM_LEDS    60
+#define NUM_LEDS2   30
+
+#define BRIGHTNESS  200 //64
+#define LED_TYPE    WS2811
+#define COLOR_ORDER GRB
+
+CRGB leds[NUM_LEDS];
+CRGB leds2[NUM_LEDS2];
+
+
+#define UPDATES_PER_SECOND 100
+
+// AUDIO INPUT SETUP
+int strobe = 4;
+int reset = 5;
+int audio1 = A0;
+int audio2 = A1;
+int left[7];
+int right[7];
+int band;
+int audio_input = 0;
+int freq = 0;
+
+// STANDARD VISUALIZER VARIABLES
+int loop_max = 0;
+int k = 255; // COLOR WHEEL POSITION
+int decay1 = 0; // HOW MANY MS BEFORE ONE LIGHT DECAY
+int decay_check1 = 0;
+int decay2 = 0; // HOW MANY MS BEFORE ONE LIGHT DECAY
+int decay_check2 = 0;
+long pre_react1 = 0;
+long pre_react2 = 0;// NEW SPIKE CONVERSION
+long react1 = 0; 
+long post_react1 = 0; 
+long react2 = 0; // NUMBER OF LEDs BEING LIT
+long post_react2 = 0; // OLD SPIKE CONVERSION
+
+
+// RAINBOW WAVE SETTINGS
+int wheel_speed = 2;
+
+void setup()
+{
+  // SPECTRUM SETUP
+  pinMode(audio1, INPUT);
+  pinMode(audio2, INPUT);
+  pinMode(strobe, OUTPUT);
+  pinMode(reset, OUTPUT);
+  digitalWrite(reset, LOW);
+  digitalWrite(strobe, HIGH);
+  
+  // LED LIGHTING SETUP
+  delay( 3000 ); // power-up safety delay
+  FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection( TypicalLEDStrip );
+  FastLED.addLeds<LED_TYPE, LED_PIN2, COLOR_ORDER>(leds2, NUM_LEDS2).setCorrection( TypicalLEDStrip );
+  FastLED.setBrightness(  BRIGHTNESS );
+
+  // CLEAR LEDS
+  for (int i = 0; i < NUM_LEDS; i++)
+    leds[i] = CRGB(0, 0, 0);
+  for (int i = 0; i < NUM_LEDS2; i++)
+    leds2[i] = CRGB(0, 0, 0);
+  FastLED.show();
+
+  // SERIAL AND INPUT SETUP
+  Serial.begin(115200);
+  Serial.println("\nListening...");
+}
+
+
+void FlashLight()
+{
+  for(int i = NUM_LEDS - 1; i >= 0; i--) {
+    if ( react1 > 24)
+      leds[i] = CRGB(255, 255, 255); 
+    else
+      leds[i] = CRGB(0, 0, 0);      
+  }
+  FastLED.show(); 
+}
+
+void RedLight()
+{
+  for(int i = NUM_LEDS2 - 1; i >= 0; i--) {
+    if ( react2 > 15)
+      leds2[i] = CRGB(255, 0, 0); 
+    else
+      leds2[i] = CRGB(0, 0, 0);      
+  }
+  FastLED.show(); 
+}
+
+void readMSGEQ7()
+// Function to read 7 band equalizers
+{
+  digitalWrite(reset, HIGH);
+  digitalWrite(reset, LOW);
+  for(band=0; band <7; band++)
+  {
+    digitalWrite(strobe, LOW); // strobe pin on the shield - kicks the IC up to the next band 
+    delayMicroseconds(30); // 
+    left[band] = analogRead(audio1) ; // store left band reading
+    right[band] = analogRead(audio2) ; // ... and the right
+    digitalWrite(strobe, HIGH); 
+  }
+}
+
+void convertSingleLED1(int freqBand)
+{
+  if (left[freqBand] > right[freqBand])
+    audio_input = left[freqBand];
+  else
+    audio_input = right[freqBand];
+
+  if (audio_input > 80)
+  {
+    pre_react1 = ((long)NUM_LEDS * (long)audio_input) / 1023L; // TRANSLATE AUDIO LEVEL TO NUMBER OF LEDs
+
+    if (pre_react1 > react1) // ONLY ADJUST LEVEL OF LED IF LEVEL HIGHER THAN CURRENT LEVEL
+      react1 = pre_react1;
+
+    Serial.print(audio_input);
+    Serial.print(" -> ");
+    Serial.println(pre_react1);
+  }
+}
+
+void convertSingleLED2(int freqBand)
+{
+  if (left[freqBand] > right[freqBand])
+    audio_input = left[freqBand];
+  else
+    audio_input = right[freqBand];
+
+  if (audio_input > 80)
+  {
+    pre_react2 = ((long)NUM_LEDS2 * (long)audio_input) / 1023L; // TRANSLATE AUDIO LEVEL TO NUMBER OF LEDs
+
+    if (pre_react2 > react2) // ONLY ADJUST LEVEL OF LED IF LEVEL HIGHER THAN CURRENT LEVEL
+      react2 = pre_react2;
+
+    Serial.print(audio_input);
+    Serial.print(" -> ");
+    Serial.println(pre_react2);
+  }
+}
+
+void singleLevel()
+{
+  readMSGEQ7();
+
+  convertSingleLED1(0);
+  convertSingleLED2(6);
+  
+  FlashLight();
+  RedLight(); // APPLY COLOR
+
+
+  // REMOVE LEDs
+  decay_check1++;
+  if (decay_check1 > decay1)
+  {
+    decay_check1 = 0;
+    if (react1 > 0)
+      react1--;
+  }
+    // REMOVE LEDs
+  decay_check2++;
+  if (decay_check2 > decay2)
+  {
+    decay_check2 = 0;
+    if (react2 > 0)
+      react2--;
+  }
+}
+
+void loop()
+{  
+  singleLevel();
+  //doubleLevel();
+  //delay(1);
+}
